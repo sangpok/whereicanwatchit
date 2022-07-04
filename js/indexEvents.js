@@ -1,6 +1,11 @@
 const API_PATH = 'https://api.themoviedb.org/3';
 const API_KEY = 'ed6cc14023a74712f2b2ca3d7695bc00';
 
+const controller = new AbortController();
+
+let isSearching = false;
+let RESULT_LIST = [];
+
 const makeURL = (des, ...param) => {
     let URL = `${API_PATH}${des}?api_key=${API_KEY}`;
     if (param)
@@ -14,78 +19,92 @@ const makeURL = (des, ...param) => {
     return URL;
 };
 
-const searchMovie = async (movie_name) => {
-    let RESULT_LIST = [];
+const connectURL = async (des, ...params) => {
+    return (
+        await fetch(makeURL(des, ...params), {
+            signal: controller.signal,
+        })
+    ).json();
+};
 
-    const movieListResultProm = await fetch(
-        makeURL(
-            '/search/multi',
-            `query=${movie_name}`,
-            'language=ko',
-            'page=1',
-            'include_adult=true',
-            'region=true',
-            'append_to_response=videos,images,watch/providers'
+const getDetailList = async (fetchSrc) => {
+    if (!fetchSrc.length) return;
+
+    let fetchList = fetchSrc.map((item) =>
+        fetch(
+            makeURL(
+                `/${item.media_type}/${item.id}`,
+                'language=ko',
+                'append_to_response=credits,watch/providers'
+            ),
+            {
+                signal: controller.signal,
+            }
         )
     );
-    const movieList = await movieListResultProm.json();
-    const result1 = [...movieList.results];
 
-    result1.forEach((item) => {
-        RESULT_LIST.push({
-            id: item.id,
-            media_type: item.media_type,
-            name: item.name || item.title,
-            release_date: item.release_date || item.first_air_date,
-            poster_path: item.poster_path,
-        });
+    return Promise.all((await Promise.all(fetchList)).map((item) => item.json()));
+};
+
+const searchMovie = async (movie_name) => {
+    if (movie_name === '') return null;
+
+    const searchResult = await connectURL(
+        '/search/multi',
+        `query=${movie_name}`,
+        'language=ko',
+        'page=1',
+        'include_adult=false',
+        'region=true',
+        'append_to_response=videos,images,watch/providers'
+    );
+
+    let curResultList = [];
+    let { total_results, total_pages } = searchResult;
+
+    if (!total_results) return;
+
+    searchResult.results.forEach((item) => {
+        let existItem = RESULT_LIST.filter((resultItem) => resultItem.id === item.id);
+
+        if (existItem.length > 0) {
+            curResultList.push(...existItem);
+        } else {
+            if (item.media_type !== 'person')
+                curResultList.push({
+                    id: item.id,
+                    media_type: item.media_type,
+                    name: item.name || item.title,
+                    release_date: item.release_date || item.first_air_date,
+                    poster_path: item.poster_path,
+                    providers: undefined,
+                    credits: undefined,
+                });
+        }
     });
 
-    console.log(result1);
+    let needDetailList = curResultList.filter((item) => item.providers === undefined);
+    let itemDetailList = (await getDetailList(needDetailList)) || [];
 
-    const responsePromises = await Promise.all(
-        result1.map((item) =>
-            fetch(
-                item.media_type === 'tv'
-                    ? makeURL(
-                          `/tv/${item.id}`,
-                          'language=ko',
-                          'append_to_response=credits,watch/providers'
-                      )
-                    : makeURL(
-                          `/movie/${item.id}`,
-                          'language=ko',
-                          'append_to_response=credits,watch/providers'
-                      )
-            )
-        )
-    );
-
-    const jsonPromises = await Promise.all(responsePromises.map((item) => item.json()));
-
-    for (let response of jsonPromises) {
-        let lstIdx = RESULT_LIST.findIndex((item) => item.id === response.id);
-        RESULT_LIST[lstIdx].providers = response['watch/providers']?.results['KR'] || null;
-        RESULT_LIST[lstIdx].credits = response['credits'] || null;
+    for (let response of itemDetailList) {
+        let lstIdx = curResultList.findIndex((item) => item.id === response.id);
+        curResultList[lstIdx].providers = response['watch/providers']?.results['KR'] || null;
+        curResultList[lstIdx].credits = response['credits'] || null;
     }
 
-    const tvResultDiv = document.querySelector('#tv-result ul');
-    const filmResultDiv = document.querySelector('#film-result ul');
+    const tvResultDiv = document.querySelector('#tv-result');
+    const filmResultDiv = document.querySelector('#film-result');
 
-    if (tvResultDiv.childElementCount) {
-        while (tvResultDiv.firstChild) {
-            tvResultDiv.removeChild(tvResultDiv.lastChild);
-        }
-    }
+    const fragmentTv = new DocumentFragment();
+    const fragmentFilm = new DocumentFragment();
 
-    if (filmResultDiv.childElementCount) {
-        while (filmResultDiv.firstChild) {
-            filmResultDiv.removeChild(filmResultDiv.lastChild);
-        }
-    }
-    // filmResultDiv.innerHTML = '';
+    const newUlTv = document.createElement('ul');
+    const newUlFilm = document.createElement('ul');
 
-    for (let movieItem of RESULT_LIST) {
+    newUlTv.classList.add('related-list');
+    newUlFilm.classList.add('related-list');
+
+    for (let movieItem of curResultList) {
         const newLi = document.createElement('li');
         const newDiv = document.createElement('div');
         const newDiv2 = document.createElement('div');
@@ -94,8 +113,6 @@ const searchMovie = async (movie_name) => {
 
         const newDivProvider = document.createElement('div');
         newDivProvider.classList.add('providers');
-
-        console.log(movieItem.providers?.flatrate);
 
         if (movieItem.providers?.flatrate !== undefined) {
             for (let provider of movieItem.providers?.flatrate) {
@@ -110,42 +127,59 @@ const searchMovie = async (movie_name) => {
             }
         }
 
-        console.log(movieItem.poster_path);
         newImg.src = movieItem.poster_path
             ? 'https://image.tmdb.org/t/p/w500' + movieItem.poster_path
             : '';
 
         newImg.setAttribute('loading', 'lazy');
         newDiv.classList.add('img-wrapper');
+
         if (movieItem.poster_path !== null) newDiv.appendChild(newImg);
 
         newH2.innerText = movieItem.name;
         newDiv2.classList.add('overlay-container');
         newDiv2.appendChild(newH2);
 
-        newLi.appendChild(newDiv);
-        newLi.appendChild(newDiv2);
-        newLi.appendChild(newDivProvider);
+        newLi.append(newDiv, newDiv2, newDivProvider);
 
         if (movieItem.media_type === 'tv') {
-            tvResultDiv.appendChild(newLi);
+            newUlTv.appendChild(newLi);
         } else {
-            filmResultDiv.appendChild(newLi);
+            newUlFilm.appendChild(newLi);
         }
-
-        // const searchResult = document.querySelector('#search-result');
-        // const newP = document.createElement('p');
-        // const newImage = document.createElement('img');
-        // newP.innerText = `${movieItem.name} / ${movieItem.id}`;
-        // newImage.setAttribute('loading', 'lazy');
-        // newImage.src = movieItem.poster_path
-        //     ? 'https://www.themoviedb.org/t/p/w94_and_h141_bestv2' + movieItem.poster_path
-        //     : '';
-        // searchResult.appendChild(newP);
-        // searchResult.appendChild(newImage);
     }
 
-    console.log(RESULT_LIST);
+    fragmentTv.appendChild(newUlTv);
+    fragmentFilm.appendChild(newUlFilm);
+
+    let ulNodeTv = tvResultDiv.querySelector('ul');
+    let ulNodeFilm = filmResultDiv.querySelector('ul');
+
+    if (ulNodeTv !== null) {
+        ulNodeTv.remove();
+    }
+
+    if (ulNodeFilm !== null) {
+        ulNodeFilm.remove();
+    }
+
+    if (curResultList[0].media_type === 'tv') {
+        tvResultDiv.style.order = '1';
+        filmResultDiv.style.order = '2';
+    } else {
+        tvResultDiv.style.order = '2';
+        filmResultDiv.style.order = '1';
+    }
+
+    tvResultDiv.insertBefore(fragmentTv, tvResultDiv.querySelector('button'));
+    filmResultDiv.insertBefore(fragmentFilm, filmResultDiv.querySelector('button'));
+
+    curResultList.forEach((item) => {
+        let isExist = RESULT_LIST.some((elem) => elem.id === item.id);
+        if (!isExist) RESULT_LIST.push(item);
+    });
+
+    isSearching = false;
 };
 
 const searchBox = document.querySelector('.search-box input');
@@ -153,3 +187,11 @@ const searchBox = document.querySelector('.search-box input');
 searchBox.addEventListener('input', (event) => {
     searchMovie(searchBox.value);
 });
+
+// document.querySelector('#tv-result').addEventListener('load', (event) => {
+//     console.log('tvResultDiv 로드 완료');
+// });
+
+// document.querySelector('#film-result').addEventListener('load', (event) => {
+//     console.log('filmResultDiv 로드 완료');
+// });
