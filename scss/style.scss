@@ -91,6 +91,7 @@ div.logo-container {
             padding: 12px;
             position: relative;
             background-color: #fff;
+            gap: 12px;
 
             .content-group {
                 padding-bottom: 24px;
@@ -98,6 +99,10 @@ div.logo-container {
                 p {
                     margin-bottom: 12px;
                     font-weight: 700;
+                }
+
+                &.hide {
+                    display: none;
                 }
             }
 
@@ -110,12 +115,12 @@ div.logo-container {
                 list-style: none;
 
                 li {
-                    border-radius: 5px;
-                    overflow: hidden;
                     display: flex;
+                    overflow: hidden;
                     width: 100%;
                     position: relative;
                     transition: all 0.1s ease-in-out;
+                    border-radius: 5px;
 
                     &:hover {
                         cursor: pointer;
@@ -149,18 +154,18 @@ div.logo-container {
                         align-items: flex-end;
 
                         h2 {
-                            text-align: center;
                             margin-bottom: 12px;
+                            text-align: center;
                         }
                     }
 
                     div.providers {
                         display: flex;
                         flex-direction: row;
-                        gap: 4px;
                         padding: 12px;
                         position: absolute;
                         top: 0;
+                        gap: 4px;
                         justify-content: left;
                         align-items: center;
 
